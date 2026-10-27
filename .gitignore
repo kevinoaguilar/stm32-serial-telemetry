@@ -1,0 +1,12 @@
+# host build output
+*.exe
+*.o
+
+# CubeIDE build output and local settings
+firmware/**/Debug/
+firmware/**/Release/
+.metadata/
+*.launch
+
+# editor
+.vscode/
