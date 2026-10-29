@@ -3,7 +3,6 @@
 #include <iostream>
 #include "Pipeline.h"
 
-
 void runPipeline(DataSource& source, PacketReader& reader, int maxReads){
     int reads = 0;
     int currentChunk = 0;

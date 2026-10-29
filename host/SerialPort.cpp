@@ -67,7 +67,7 @@ std::vector<uint8_t> SerialPort::readChunk() {
         bucket.data(),          // raw memory address where Windows will store bytes in
         (DWORD)bucket.size(),   // max capacity (256)
         &bytesRead,              // out-parameter to store number of bytes it read
-        nullptr                // asyince I/O
+        nullptr                // async I/O
     );
     if (!ok) {
         std::string error = std::to_string(GetLastError());
