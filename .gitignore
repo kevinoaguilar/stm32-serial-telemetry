@@ -2,6 +2,9 @@
 *.exe
 *.o
 
+#local recordings
+host/*.bin
+
 # CubeIDE build output and local settings
 firmware/**/Debug/
 firmware/**/Release/
