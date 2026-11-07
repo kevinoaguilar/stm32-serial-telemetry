@@ -5,31 +5,30 @@ std::vector<ParsedPacket> PacketReader::feed(const std::vector<uint8_t>& chunk) 
     pending.insert(pending.end(), chunk.begin(), chunk.end());
 
     while (!pending.empty()) {
-        while (!pending.empty() && pending.front() != 0xAA) {
-            pending.erase(pending.begin());
+        size_t index = 0;
+        bool zeroFound = false;
+        for (size_t i = 0; i < pending.size(); i++){
+            if (pending[i] == 0x00){
+                index = i;
+                zeroFound = true;
+                break;
+            } 
         }
 
-        if (pending.size() < 2){
+        if (!zeroFound) {
             break;
-        }   
-
-        if (pending.size() < (size_t)pending[1] + 3){
-            break;
         }
 
-        uint8_t payloadLength = pending[1];
-        size_t totalPacketSize = payloadLength + 3;
-        std::vector<uint8_t> parse(pending.begin(), pending.begin() + totalPacketSize);
-        ParsedPacket packet = parsePacket(parse);
-        if (!packet.valid){
-            pending.erase(pending.begin());
+        std::vector<uint8_t> frame(pending.begin(), pending.begin() + index);
+        pending.erase(pending.begin(), pending.begin() + index + 1);
+
+        if (frame.empty()){
+            continue;
         }
-        else{
-            pending.erase(pending.begin(), pending.begin() + totalPacketSize);
-        }
+
+        ParsedPacket packet = parseFrame(frame);
         packets.push_back(packet);
-
     }
+    
     return packets;
-
 }

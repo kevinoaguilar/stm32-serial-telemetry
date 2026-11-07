@@ -10,8 +10,5 @@ struct ParsedPacket {
     std::vector<uint8_t> payload;
 };
 
-uint8_t computeChecksum(const std::vector<uint8_t>& payload);
+ParsedPacket parseFrame(const std::vector<uint8_t>& frame);
 
-ParsedPacket parsePacket(const std::vector<uint8_t>& buf);
-
-void printResult(const std::string& name, const ParsedPacket& p);
