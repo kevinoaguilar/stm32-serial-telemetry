@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "cobs.h"
+#include "crc16.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -101,34 +102,28 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 	  // Initializing the individual values
-	  uint8_t header = 0xAA;
-	  uint8_t payload_length = 3;
-	  uint8_t payload1 = 0x11;
-	  uint8_t payload2 = 0x22;
+	  uint8_t raw[5];
+	  uint8_t frame[7];
 
-	  uint8_t packet[6];
+	  raw[0] = 0x11;
+	  raw[1] = 0x22;
+	  raw[2] = counter;
 
-	  // Filling in specific indices
-	  packet[0] = header;
-	  packet[1] = payload_length;
-	  packet[2] = payload1;
-	  packet[3] = payload2;
-	  packet[4] = counter;
+	  uint16_t crcSignature = crc16(raw, 3);
+	  uint8_t crcHi = (uint8_t)(crcSignature >> 8);
+	  uint8_t crcLo = (uint8_t)(crcSignature);
+	  raw[3] = crcHi;
+	  raw[4] = crcLo;
 
-	  // Computing the checksum over the payload indices
-	  uint8_t checksum = 0;
-	  for (size_t i = 2; i < (size_t)payload_length + 2; i++){
-		  checksum += packet[i];
-	  }
-
-	  packet[5] = checksum;
+	  size_t frameLength = cobsEncode(raw, 5, frame);
+	  frame[frameLength] = 0x00;
 
 	  // HAL_UART_Transmit and keeping returned data
 	  HAL_StatusTypeDef status = HAL_UART_Transmit(
-			  &huart2,			// passing &huart2
-			  packet,		// first byte of the packet
-			  sizeof(packet),	// how many bytes
-			  100			// max ms to wait before aborting
+			  &huart2,						// passing &huart2
+			  frame,						// first byte of encoded frame
+			  (uint16_t)frameLength + 1,	// encoded frame length + 0x00
+			  100							// max ms to wait before aborting
 	  );
 
 	  if (status != HAL_OK) {
