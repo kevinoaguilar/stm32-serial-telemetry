@@ -11,7 +11,14 @@ flowchart LR
     A["STM32F411 firmware<br/>payload + CRC-16 → COBS → 0x00"] -->|"UART 115200 8N1 (USART2)"| B["ST-Link<br/>virtual COM port"]
     B -->|"USB (COM5)"| C["DataSource<br/>(SerialPort, FileSource, ...)"]
     subgraph Host["Windows host (C++17)"]
-        C --> D["PacketReader<br/>split at 0x00"] --> E["parseFrame<br/>COBS decode + CRC check"] --> F["printed results"]
+        subgraph RT["reader thread"]
+            C
+        end
+        C -->|"push"| Q["ChunkQueue<br/>mutex + condition_variable"]
+        subgraph MT["main thread"]
+            D["PacketReader<br/>split at 0x00"] --> E["parseFrame<br/>COBS decode + CRC check"] --> F["printed results"]
+        end
+        Q -->|"pop"| D
     end
 ```
 
@@ -44,9 +51,20 @@ Example on the wire, counter `0x05`: `06 11 22 05 88 EE 00`.
 | `PacketReader` | keeps leftover bytes between reads and cuts a frame at each `0x00`, so frames split across reads are reassembled |
 | `parseFrame` | COBS-decodes one frame and checks its CRC-16 |
 | `Cobs`, `Crc16` | `cobsEncode` / `cobsDecode` and `crc16`, written with pointer + length so the same code runs on the board |
-| `Pipeline` | `runPipeline(source, reader, maxReads)` is one loop that works with any `DataSource` |
+| `ChunkQueue` | thread-safe FIFO of chunks: `push`, a blocking `pop` (sleeps on a `std::condition_variable`), and `close()` to signal end of stream; chunks are moved in and out, never copied |
+| `ReaderThread` | owns a `std::thread` that loops on `readChunk()` and pushes each non-empty chunk; stops on a `std::atomic<bool>` flag or at end of stream, catches exceptions inside the thread and reports them, always calls `close()`, and joins in its destructor (RAII) |
+| `Pipeline` | `runPipeline(source, reader, maxReads)` starts a `ReaderThread`, then pops and parses chunks on the main thread; works with any `DataSource` |
 
 `telemetry` picks its source at runtime and owns it through `std::unique_ptr<DataSource>`. Because `runPipeline` only depends on the `DataSource` interface, the same code runs against the real board, a recorded file, or scripted test data.
+
+### Threading
+
+Reading and parsing run on two threads. The reader thread is the only code that touches the `DataSource`, and the main thread is the only code that touches `PacketReader`, so the `ChunkQueue` is the one shared object and the only place that needs a lock. The lock is held only while a chunk is moved in or out, and the main thread sleeps while the queue is empty instead of polling.
+
+Shutdown is designed so the program cannot hang or crash on exit:
+- Every way the reader can stop (end of stream, stop requested, or an exception such as the board being unplugged) ends with `close()`, which wakes the main thread.
+- An exception in the reader is caught on the reader thread, saved, and printed by the main thread after `join()` as `Reader stopped: <message>`. Unplugging the board mid-run ends the program cleanly and still closes the COM port.
+- `ReaderThread` joins in its destructor, so leaving `runPipeline` early, even through an exception, never destroys a joinable thread.
 
 ## Repository layout
 
@@ -65,7 +83,7 @@ host/samples/capture.bin            a real recording from the board, for replay 
 ### Host (Windows, GCC via MSYS2)
 From `host/`:
 ```
-g++ -Wall -Wextra -std=c++17 telemetry.cpp Pipeline.cpp SerialPort.cpp ChunkListSource.cpp RecordingSource.cpp FileSource.cpp PacketReader.cpp Parser.cpp Cobs.cpp Crc16.cpp -o telemetry
+g++ -Wall -Wextra -std=c++17 -pthread telemetry.cpp Pipeline.cpp ReaderThread.cpp ChunkQueue.cpp SerialPort.cpp ChunkListSource.cpp RecordingSource.cpp FileSource.cpp PacketReader.cpp Parser.cpp Cobs.cpp Crc16.cpp -o telemetry
 ```
 
 | command | what it does |
@@ -108,8 +126,10 @@ COM5 port is now closed.
 ## Known limitations
 
 - **Frame size:** the COBS implementation handles frames shorter than 254 bytes, which covers the current 5-byte frames. Longer frames need the extra `0xFF` code-block rule.
-- **No delivery guarantee:** bytes sent while no program has the port open may be dropped. The counter makes these gaps visible.
-- **Read limit:** `runPipeline` stops after `maxReads` reads, so a long recording is only partly replayed.
+- **No delivery guarantee:** bytes sent while no program has the port open may be dropped, and some of them are stored and arrive all at once in the first read. The counter makes these gaps visible, and the first frame of that backlog can be cut off and reported as `INVALID`. Clearing the input buffer with `PurgeComm` after opening the port would avoid this.
+- **Read limit:** `runPipeline` stops after `maxReads` non-empty chunks, so a long recording is only partly replayed. If the board is connected but sends nothing, no chunks arrive and the program waits until Ctrl+C.
+- **Shutdown time:** the reader thread checks its stop flag between reads, so stopping can take up to the 1 s serial read timeout.
+- **Unbounded queue:** if parsing ever fell behind reading, the queue would keep growing. A bounded queue would make the reader wait instead.
 
 ## Roadmap
 
@@ -117,5 +137,6 @@ COM5 port is now closed.
 - [x] `DataSource` interface; serial, test, recording and file-replay sources share one pipeline
 - [x] `std::unique_ptr` ownership of sources, chosen at runtime
 - [x] COBS framing with a `0x00` delimiter, plus CRC-16, on both ends
+- [x] Background reader thread with a thread-safe queue (`std::thread`, `std::mutex`, `std::condition_variable`, `std::atomic`) and clean shutdown
 - [ ] Fault-injecting source for robustness tests
 - [ ] CMake build, GoogleTest unit tests, CI
