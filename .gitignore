@@ -5,6 +5,10 @@
 #local recordings
 host/*.bin
 
+# practice programs (not part of telemetry)
+host/threadDemo.cpp
+host/queueDemo.cpp
+
 # CubeIDE build output and local settings
 firmware/**/Debug/
 firmware/**/Release/
