@@ -1,35 +1,49 @@
+#include <iostream>
+#include <vector>
 #include "DataSource.h"
 #include "PacketReader.h"
-#include <iostream>
 #include "Pipeline.h"
+#include "ReaderThread.h"
+#include "ChunkQueue.h"
 
-void runPipeline(DataSource& source, PacketReader& reader, int maxReads){
+void runPipeline(DataSource &source, PacketReader &reader, int maxReads)
+{
     int reads = 0;
-    int currentChunk = 0;
+    ChunkQueue queue;
+    ReaderThread readerthread(source, queue);
+    std::vector<uint8_t> chunks;
 
-    while (!source.isFinished() && reads < maxReads) {
-        std::vector<uint8_t> bytes(source.readChunk());
-            ++reads;
+    while (queue.pop(chunks))
+    {
+        ++reads;
 
-        if (bytes.empty()) {
-            continue;
+        std::vector<ParsedPacket> packets = reader.feed(chunks);
+        std::cout << "Chunks received: " << reads << "\nPackets created: " << packets.size() << "\n";
+        for (const ParsedPacket &packet : packets)
+        {
+            if (packet.valid)
+            {
+                std::cout << " VALID    -> " << "   Payload size : " << packet.payload.size() << "\n";
+            }
+            else
+            {
+                std::cout << "INVALID\n";
+            }
+            for (uint8_t b : packet.payload)
+            {
+                std::cout << std::hex << static_cast<int>(b) << " " << std::dec;
+            }
+            std::cout << "\n";
         }
+        if (reads >= maxReads && maxReads > 0)
+        {
+            break;
+        }
+    }
+    readerthread.stop();
 
-        currentChunk++;
-        std::vector<ParsedPacket> packets = reader.feed(bytes);
-        std::cout << "Chunks received: " << currentChunk << "\nPackets created: " << packets.size() << "\n";
-          for (const ParsedPacket& packet : packets) {
-                if (packet.valid) {
-                    std::cout << " VALID    -> " << "   Payload size : " << packet.payload.size() << "\n";
-                }
-                else {
-                    std::cout << "INVALID\n";
-                } 
-                for (uint8_t b : packet.payload) {
-                    std::cout << std::hex << (int)b << " " << std::dec;
-                }
-                std::cout << "\n";
-          }
+    if (!readerthread.error().empty())
+    {
+        std::cerr << "Reader stopped: " << readerthread.error() << "\n";
     }
 }
-
