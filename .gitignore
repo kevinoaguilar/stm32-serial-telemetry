@@ -8,6 +8,10 @@ host/*.bin
 # practice programs (not part of telemetry)
 host/threadDemo.cpp
 host/queueDemo.cpp
+host/readerTest.cpp
+host/pipelineTest.cpp
+host/serialTest.cpp
+host/PacketStats.*
 
 # CubeIDE build output and local settings
 firmware/**/Debug/
