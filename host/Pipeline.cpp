@@ -16,7 +16,7 @@ void runPipeline(DataSource &source, PacketReader &reader, int maxReads)
     while (queue.pop(chunks))
     {
         ++reads;
-
+        
         std::vector<ParsedPacket> packets = reader.feed(chunks);
         std::cout << "Chunks received: " << reads << "\nPackets created: " << packets.size() << "\n";
         for (const ParsedPacket &packet : packets)

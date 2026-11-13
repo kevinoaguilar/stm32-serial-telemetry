@@ -45,12 +45,16 @@ SerialPort::SerialPort(const std::string& portName, const DWORD bitRate) : portN
 
     if (!SetCommTimeouts(hport, &t)) {
         std::string error = std::to_string(GetLastError());
-            CloseHandle(hport); 
-            throw std::runtime_error("Could not set TIMEOUT configuration settings on " + portName + ". Error Code: " + error);
+        CloseHandle(hport); 
+        throw std::runtime_error("Could not set TIMEOUT configuration settings on " + portName + ". Error Code: " + error);
     }
 
-
-    std::cout << "VALID     " << fullPath << "  ->  " << hport << "\n";
+    DWORD purgeFlags = PURGE_RXCLEAR | PURGE_TXCLEAR | PURGE_RXABORT | PURGE_TXABORT;
+    if (!PurgeComm(hport, purgeFlags)){
+        std::string error = std::to_string(GetLastError());
+        CloseHandle(hport); 
+        throw std::runtime_error("Could not clear I/O buffer on " + portName + ". Error Code: " + error);
+    }
 }
 
 SerialPort::~SerialPort() {
