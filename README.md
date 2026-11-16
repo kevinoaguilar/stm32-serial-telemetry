@@ -44,7 +44,7 @@ Example on the wire, counter `0x05`: `06 11 22 05 88 EE 00`.
 | component | role |
 |---|---|
 | `DataSource` | interface: `readChunk()` returns whatever bytes are available (it may be empty), and `isFinished()` reports end of stream |
-| `SerialPort` | `DataSource` over a Windows COM port (RAII handle, 8N1, 1 s read timeout); throws on I/O errors |
+| `SerialPort` | `DataSource` over a Windows COM port (RAII handle, 8N1, clears stale input on open; a read returns as soon as bytes arrive, or after 1 s with none); throws on I/O errors |
 | `ChunkListSource` | `DataSource` that replays hand-written chunks, used for testing without hardware |
 | `RecordingSource` | wraps another `DataSource` (owned through `std::unique_ptr`) and writes every byte it passes on to a file |
 | `FileSource` | `DataSource` that replays a recorded file in fixed-size chunks |
@@ -126,7 +126,7 @@ COM5 port is now closed.
 ## Known limitations
 
 - **Frame size:** the COBS implementation handles frames shorter than 254 bytes, which covers the current 5-byte frames. Longer frames need the extra `0xFF` code-block rule.
-- **No delivery guarantee:** bytes sent while no program has the port open may be dropped, and some of them are stored and arrive all at once in the first read. The counter makes these gaps visible, and the first frame of that backlog can be cut off and reported as `INVALID`. Clearing the input buffer with `PurgeComm` after opening the port would avoid this.
+- **No delivery guarantee:** frames sent while no program has the port open are lost. `SerialPort` clears stale input with `PurgeComm` when it opens, so a run starts with live data, and the counter shows how many frames were missed between runs.
 - **Read limit:** `runPipeline` stops after `maxReads` non-empty chunks, so a long recording is only partly replayed. If the board is connected but sends nothing, no chunks arrive and the program waits until Ctrl+C.
 - **Shutdown time:** the reader thread checks its stop flag between reads, so stopping can take up to the 1 s serial read timeout.
 - **Unbounded queue:** if parsing ever fell behind reading, the queue would keep growing. A bounded queue would make the reader wait instead.
