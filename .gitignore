@@ -1,6 +1,7 @@
 # host build output
 *.exe
 *.o
+build/
 
 #local recordings
 host/*.bin
