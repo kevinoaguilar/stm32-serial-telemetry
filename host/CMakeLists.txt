@@ -40,3 +40,35 @@ if(WIN32)
     # Linking library to executable
     target_link_libraries(telemetry PRIVATE telemetry_core)
 endif()
+
+# Downloading GoogleTest source code dependency
+include(FetchContent)
+FetchContent_Declare(
+    googletest 
+    URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.zip
+    DOWNLOAD_EXTRACT_TIMESTAMP true
+)
+FetchContent_MakeAvailable(googletest)
+
+# Turn on Testing
+enable_testing()
+
+# GoogleTest Executable ONLY for running tests
+add_executable(unit_tests 
+    tests/crcTest.cpp
+    tests/cobsTest.cpp
+    tests/parserTest.cpp
+    tests/packetReaderTest.cpp
+    tests/chunkQueueTest.cpp
+    tests/readerThreadTest.cpp
+)
+
+# Linking Testing Executable
+target_link_libraries(unit_tests PRIVATE telemetry_core GTest::gtest_main)
+
+# Register with CTest
+include(GoogleTest)
+gtest_discover_tests(unit_tests)
+
+# Allow tests/ access to fetch from hosts/
+target_include_directories(telemetry_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
