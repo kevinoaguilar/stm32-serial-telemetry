@@ -1,3 +1,5 @@
+#include <vector>
+#include <cstdint>
 #include "PacketReader.h"
 
 std::vector<ParsedPacket> PacketReader::feed(const std::vector<uint8_t>& chunk) {
