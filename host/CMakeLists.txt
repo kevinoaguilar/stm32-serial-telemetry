@@ -23,6 +23,15 @@ add_library(telemetry_core STATIC
 # Warnings to the library
 target_compile_options(telemetry_core PRIVATE -Wall -Wextra)
 
+# Declaring a switch for '-Werror' to prohibit warnings from becoming hard compile errors on testing code, default to OFF
+option(TELEMETRY_WERROR "Treat warnings as errors" OFF)
+
+
+# CI will always turn on '-Werror' to catch any warnings
+if(TELEMETRY_WERROR)
+    target_compile_options(telemetry_core PRIVATE -Werror)
+endif()
+
 # Linking multithreading libraries PUBLICLY
 find_package(Threads REQUIRED)
 target_link_libraries(telemetry_core PUBLIC Threads::Threads)
@@ -34,8 +43,12 @@ if(WIN32)
         SerialPort.cpp
     )
 
-    # Applying warnings to Windoes exe
+    # Applying warnings to Windows exe
     target_compile_options(telemetry PRIVATE -Wall -Wextra)
+
+    if(TELEMETRY_WERROR)
+        target_compile_options(telemetry PRIVATE -Werror)
+    endif()
 
     # Linking library to executable
     target_link_libraries(telemetry PRIVATE telemetry_core)
@@ -48,6 +61,9 @@ FetchContent_Declare(
     URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.zip
     DOWNLOAD_EXTRACT_TIMESTAMP true
 )
+# GoogleMock: never used. To prevent it being built, turn it off and store is a cache value
+set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
+
 FetchContent_MakeAvailable(googletest)
 
 # Turn on Testing
@@ -62,6 +78,13 @@ add_executable(unit_tests
     tests/chunkQueueTest.cpp
     tests/readerThreadTest.cpp
 )
+
+# Applying warnings to unit_tests
+target_compile_options(unit_tests PRIVATE -Wall -Wextra)
+
+if(TELEMETRY_WERROR)
+    target_compile_options(unit_tests PRIVATE -Werror)
+endif()
 
 # Linking Testing Executable
 target_link_libraries(unit_tests PRIVATE telemetry_core GTest::gtest_main)
