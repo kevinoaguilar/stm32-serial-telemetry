@@ -6,6 +6,15 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Switch for 'TSan,' checking for any dtaat races through every memory read/write
+option(TELEMETRY_TSAN "Build with ThreadSanitizer" OFF)
+
+# When ON, compiles everyting with TSan
+if(TELEMETRY_TSAN)
+    add_compile_options(-fsanitize=thread -g -O1)
+    add_link_options(-fsanitize=thread)
+endif()
+
 # The Core Library (No main(), No windows.h)
 add_library(telemetry_core STATIC
     Pipeline.cpp
