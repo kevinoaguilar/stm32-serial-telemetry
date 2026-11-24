@@ -1,8 +1,10 @@
 # STM32 Serial Telemetry
 
+[![CI](https://github.com/kevinoaguilar/stm32-serial-telemetry/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinoaguilar/stm32-serial-telemetry/actions/workflows/ci.yml)
+
 An STM32 NUCLEO-F411RE board streams framed telemetry packets over UART, and a Windows C++17 host program reads them, splits the byte stream into frames, verifies each one with a CRC, and prints the result.
 
-Both halves are written from scratch. The firmware is in C on the STM32 HAL, and the host is in C++17 using the Win32 serial API, with no third-party libraries.
+Both halves are written from scratch. The firmware is in C on the STM32 HAL, and the host is in C++17 using the Win32 serial API, with no third-party libraries in the program itself. The host builds with CMake, its unit tests use GoogleTest, and GitHub Actions builds and tests it on every push.
 
 ## How it works
 
@@ -61,17 +63,23 @@ Example on the wire, counter `0x05`: `06 11 22 05 88 EE 00`.
 
 Reading and parsing run on two threads. The reader thread is the only code that touches the `DataSource`, and the main thread is the only code that touches `PacketReader`, so the `ChunkQueue` is the one shared object and the only place that needs a lock. The lock is held only while a chunk is moved in or out, and the main thread sleeps while the queue is empty instead of polling.
 
+The threaded tests also run under ThreadSanitizer in CI (see [Continuous integration](#continuous-integration)), which reports any shared access that is not ordered by a mutex, an atomic or a `join()`.
+
 Shutdown is designed so the program cannot hang or crash on exit:
 - Every way the reader can stop (end of stream, stop requested, or an exception such as the board being unplugged) ends with `close()`, which wakes the main thread.
 - An exception in the reader is caught on the reader thread, saved, and printed by the main thread after `join()` as `Reader stopped: <message>`. Unplugging the board mid-run ends the program cleanly and still closes the COM port.
 - `ReaderThread` joins in its destructor, so leaving `runPipeline` early, even through an exception, never destroys a joinable thread.
+- `error()` is safe to read after `stop()` (ordered by `join()`) or after `pop` has returned `false` (ordered by the queue's mutex in `close()` and `pop`). Reading it earlier is a data race.
 
 ## Repository layout
 
 ```
 firmware/Telemetry_Firmware_F411/   STM32CubeIDE project (send loop in Core/Src/main.c, crc16.c, cobs.c)
-host/                               C++17 host: telemetry program, sources, reader, parser, tests
+host/                               C++17 host: telemetry program, sources, reader, parser
+host/CMakeLists.txt                 CMake build: telemetry_core library, telemetry program, unit_tests
+host/tests/                         GoogleTest unit tests
 host/samples/capture.bin            a real recording from the board, for replay without hardware
+.github/workflows/ci.yml            GitHub Actions: Linux, Windows and ThreadSanitizer jobs
 ```
 
 ## Building and running
@@ -80,27 +88,54 @@ host/samples/capture.bin            a real recording from the board, for replay 
 1. Import `firmware/Telemetry_Firmware_F411` into STM32CubeIDE (File → Import → Existing Projects into Workspace).
 2. Build and run it on a NUCLEO-F411RE. The green LED blinks once per frame sent.
 
-### Host (Windows, GCC via MSYS2)
-From `host/`:
+### Host (Windows, GCC via MSYS2 UCRT64)
+Needs GCC, CMake and Ninja. From `host/`:
 ```
-g++ -Wall -Wextra -std=c++17 -pthread telemetry.cpp Pipeline.cpp ReaderThread.cpp ChunkQueue.cpp SerialPort.cpp ChunkListSource.cpp RecordingSource.cpp FileSource.cpp PacketReader.cpp Parser.cpp Cobs.cpp Crc16.cpp -o telemetry
+cmake -S . -B build -G Ninja
+cmake --build build
 ```
+The first configure downloads GoogleTest (v1.17.0). The build creates three targets:
+
+| target | what it is |
+|---|---|
+| `telemetry_core` | static library with all the portable code (queue, reader thread, sources, framing, parser) |
+| `telemetry` | the command-line program; Windows only, because `SerialPort` uses the Win32 API |
+| `unit_tests` | the GoogleTest executable, linked against `telemetry_core` |
+
+Every target compiles with `-Wall -Wextra`. Two options are off by default:
+
+| option | effect |
+|---|---|
+| `-DTELEMETRY_WERROR=ON` | treat warnings as errors (CI uses this) |
+| `-DTELEMETRY_TSAN=ON` | build with ThreadSanitizer (`-fsanitize=thread -g -O1`); Linux only |
+
+On Linux, the same commands build `telemetry_core` and `unit_tests`.
+
+Run the program from `host/`:
 
 | command | what it does |
 |---|---|
-| `.\telemetry serial` | read live frames from the board on `COM5` |
-| `.\telemetry record <file>` | read live frames and save every raw byte to `<file>` |
-| `.\telemetry replay <file>` | replay a recording, no board needed (try `samples\capture.bin`) |
-| `.\telemetry test` | run built-in test chunks: split frames, a zero byte inside a payload, and a corrupted CRC |
-
-Unit tests for the framing code:
-```
-g++ -Wall -Wextra -std=c++17 crcTest.cpp Crc16.cpp -o crcTest
-g++ -Wall -Wextra -std=c++17 cobsTest.cpp Cobs.cpp -o cobsTest
-```
-`crcTest` checks the standard CRC-16/CCITT check value (`0x29B1` for `"123456789"`). `cobsTest` checks that encode followed by decode returns the original bytes, and that a malformed frame is rejected.
+| `build\telemetry serial` | read live frames from the board on `COM5` |
+| `build\telemetry record <file>` | read live frames and save every raw byte to `<file>` |
+| `build\telemetry replay <file>` | replay a recording, no board needed (try `samples\capture.bin`) |
+| `build\telemetry test` | run built-in test chunks: split frames, a zero byte inside a payload, and a corrupted CRC |
 
 `telemetry serial` opens `COM5`. Check which COM port the board uses in Device Manager → Ports (COM & LPT).
+
+### Unit tests
+```
+ctest --test-dir build --output-on-failure
+```
+15 GoogleTest tests, each run as its own process by `ctest`:
+
+| suite | what it checks |
+|---|---|
+| `CrcTest` | the standard CRC-16/CCITT check value (`0x29B1` for `"123456789"`) and empty input |
+| `CobsTest` | encoding known bytes, encode then decode returns the original, a broken frame is rejected |
+| `PacketReaderTest` | a frame split across chunks, two frames in one chunk, a leading `0x00` makes no packet |
+| `ParserTest` | a valid frame gives the payload, a changed byte fails the CRC, a too-short frame is rejected without crashing |
+| `ChunkQueueTest` | chunks come out in order, a closed empty queue returns `false` |
+| `readerThreadTest` | the reader delivers every chunk and then closes the queue; an exception in the source is reported by `error()` |
 
 ### Example output
 A real `telemetry serial` run with the board connected. Frames often arrive split across reads, and `PacketReader` reassembles them:
@@ -123,6 +158,17 @@ Packets created: 1
 COM5 port is now closed.
 ```
 
+## Continuous integration
+`.github/workflows/ci.yml` runs on every push and pull request. Three jobs run in parallel, each on a fresh machine:
+
+| job | runner | what it does |
+|---|---|---|
+| `linux` | `ubuntu-latest` | build with `-DTELEMETRY_WERROR=ON`, run the tests |
+| `windows` | `windows-latest` with MSYS2 UCRT64 | the same, with the GCC used for development, and also builds `telemetry` |
+| `tsan` | `ubuntu-latest` | build with `-DTELEMETRY_TSAN=ON` and run the tests under ThreadSanitizer |
+
+A warning anywhere fails the build in CI, and a data race fails the `tsan` job. Both were tested on throwaway branches: an unused variable turned `linux` and `windows` red, and removing the lock in `ChunkQueue::push` was caught only by `tsan`, while the other two jobs passed.
+
 ## Known limitations
 
 - **Frame size:** the COBS implementation handles frames shorter than 254 bytes, which covers the current 5-byte frames. Longer frames need the extra `0xFF` code-block rule.
@@ -138,5 +184,5 @@ COM5 port is now closed.
 - [x] `std::unique_ptr` ownership of sources, chosen at runtime
 - [x] COBS framing with a `0x00` delimiter, plus CRC-16, on both ends
 - [x] Background reader thread with a thread-safe queue (`std::thread`, `std::mutex`, `std::condition_variable`, `std::atomic`) and clean shutdown
+- [x] CMake build, GoogleTest unit tests, GitHub Actions CI on Linux and Windows with `-Werror`, ThreadSanitizer job
 - [ ] Fault-injecting source for robustness tests
-- [ ] CMake build, GoogleTest unit tests, CI
