@@ -27,6 +27,7 @@ add_library(telemetry_core STATIC
     Parser.cpp
     Cobs.cpp
     Crc16.cpp
+    FaultInjectingSource.cpp
 )
 
 # Warnings to the library
@@ -86,6 +87,7 @@ add_executable(unit_tests
     tests/packetReaderTest.cpp
     tests/chunkQueueTest.cpp
     tests/readerThreadTest.cpp
+    tests/faultSourceTest.cpp
 )
 
 # Applying warnings to unit_tests
